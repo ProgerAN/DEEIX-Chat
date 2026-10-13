@@ -1,0 +1,108 @@
+services:
+  app:
+    image: ${DEEIX_CHAT_IMAGE:?}
+    pull_policy: always
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: prod
+
+      # Public origin. Web and API are served by one runtime, so they share it.
+      # Referencing SERVICE_URL_APP_8080 also routes the domain to container port 8080.
+      PUBLIC_WEB_BASE_URL: ${SERVICE_URL_APP_8080}
+      PUBLIC_API_BASE_URL: ${SERVICE_URL_APP_8080}
+      CORS_ALLOW_ORIGIN: ${SERVICE_URL_APP_8080}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+
+      # Generated once by Coolify and persisted between deployments.
+      JWT_SECRET: ${SERVICE_PASSWORD_64_JWT}
+      DATA_ENCRYPTION_KEY: ${SERVICE_PASSWORD_64_ENCRYPTIONKEY}
+
+      # Environment variables take priority over config.yaml.
+      DATABASE_DRIVER: postgres
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-deeix_chat}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-deeix_chat}?sslmode=disable&TimeZone=${DB_TIMEZONE:-UTC}"
+      CACHE_DRIVER: redis
+      REDIS_ADDR: "redis:6379"
+      REDIS_USERNAME: ""
+      REDIS_PASSWORD: ${SERVICE_PASSWORD_REDIS}
+      STORAGE_BACKEND: local
+      STORAGE_ROOT_DIR: /app/storage
+    volumes:
+      - app-storage:/app/storage
+      - app-data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz || curl -fsS -o /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    stop_grace_period: 60s
+    shm_size: 256mb
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-deeix_chat}
+      POSTGRES_DB: ${POSTGRES_DB:-deeix_chat}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: redis-server --requirepass ${SERVICE_PASSWORD_REDIS} --appendonly yes
+    environment:
+      # Lets redis-cli authenticate without putting the password in the healthcheck command.
+      REDISCLI_AUTH: ${SERVICE_PASSWORD_REDIS}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  app-storage:
+  app-data:
+  postgres-data:
+  redis-data:
