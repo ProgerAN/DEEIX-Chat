@@ -3,6 +3,7 @@
 
 mod dialog;
 mod distribution;
+mod downloads;
 #[cfg(target_os = "macos")]
 mod menu;
 mod oauth_loopback;
@@ -36,9 +37,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         // Rust-side only: no `shell:*` permission is granted to the webview.
         .plugin(tauri_plugin_shell::init())
         .manage(distribution)
+        .manage(downloads::DownloadsState::default())
         .manage(oauth_loopback::LoopbackState::default())
         .manage(sidecar::SidecarState::default())
         .manage(tabs::TabsState::default())
